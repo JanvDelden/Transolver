@@ -37,10 +37,15 @@ class Physics_Attention_Irregular_Mesh(nn.Module):
             .permute(0, 2, 1, 3).contiguous()  # B H N C
         x_mid = self.in_project_x(x).reshape(B, N, self.heads, self.dim_head) \
             .permute(0, 2, 1, 3).contiguous()  # B H N C
-        slice_weights = self.softmax(self.in_project_slice(x_mid) / self.temperature)  # B H N G
-        slice_norm = slice_weights.sum(2)  # B H G
-        slice_token = torch.einsum("bhnc,bhng->bhgc", fx_mid, slice_weights)
-        slice_token = slice_token / ((slice_norm + 1e-5)[:, :, :, None].repeat(1, 1, 1, self.dim_head))
+        normalized_input = self.in_project_slice(x_mid) / self.temperature  # B H N G
+        slice_weights = self.softmax(normalized_input)
+        default_dtype = slice_weights.dtype
+
+        # To avoid numerical instability, disable autocast
+        with torch.cuda.amp.autocast(enabled=False):
+            slice_norm = torch.clamp(slice_weights.sum(2), min=1e-5)  # B H G
+            slice_token = torch.einsum("bhnc,bhng->bhgc", fx_mid.float(), slice_weights) / slice_norm[:, :, :, None]
+        slice_token = slice_token.to(default_dtype)
 
         ### (2) Attention among slice tokens
         q_slice_token = self.to_q(slice_token)

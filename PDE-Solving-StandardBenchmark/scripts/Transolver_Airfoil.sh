@@ -1,5 +1,5 @@
 python exp_airfoil.py \
---gpu 5 \
+--gpu 0 \
 --model Transolver_Structured_Mesh_2D \
 --n-hidden 128 \
 --n-heads 8 \
@@ -11,4 +11,5 @@ python exp_airfoil.py \
 --unified_pos 0 \
 --ref 8 \
 --eval 0 \
---save_name airfoil_Transolver
+--fp16 \
+--save_name airfoil_Transolver \

@@ -27,6 +27,7 @@ parser.add_argument('--unified_pos', type=int, default=0)
 parser.add_argument('--ref', type=int, default=8)
 parser.add_argument('--slice_num', type=int, default=32)
 parser.add_argument('--eval', type=int, default=0)
+parser.add_argument('--fp16', action='store_true', default=False)
 parser.add_argument('--save_name', type=str, default='airfoil_Transolver')
 parser.add_argument('--data_path', type=str, default='/data/fno/airfoil/naca')
 args = parser.parse_args()
@@ -100,6 +101,8 @@ def main():
                                   ref=args.ref,
                                   unified_pos=args.unified_pos,
                                   H=s1, W=s2).cuda()
+    torch.set_float32_matmul_precision('high')
+    model = torch.compile(model)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     print(args)
@@ -179,6 +182,7 @@ def main():
         rel_err /= ntest
         print("rel_err:{}".format(rel_err))
     else:
+        scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
         for ep in range(args.epochs):
 
             model.train()
@@ -188,13 +192,16 @@ def main():
 
                 x, fx, y = pos.cuda(), fx.cuda(), y.cuda()  # x:B,N,2  fx:B,N,2  y:B,N
                 optimizer.zero_grad()
-                out = model(x, None).squeeze(-1)
+                with torch.autocast('cuda',enabled=args.fp16):
+                    out = model(x, None).squeeze(-1)
                 loss = myloss(out, y)
-                loss.backward()
+                scaler.scale(loss).backward()
 
                 if args.max_grad_norm is not None:
+                    scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 train_loss += loss.item()
                 scheduler.step()
 
